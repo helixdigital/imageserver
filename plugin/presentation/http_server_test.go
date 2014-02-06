@@ -61,75 +61,53 @@ func TestAllWithSetup(t *testing.T) {
 
 func testStartWebserver(t *testing.T) {
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", portnum))
-	if err != nil {
-		t.Error("Get localhost unexpectedly threw an error", err)
-		return
-	}
-	if resp.StatusCode != 501 {
-		t.Error("Get localhost expected StatusCode=501 but was", resp.StatusCode)
-	}
+	assertGotStatusCode(501, resp, err, t)
 }
 
 func testStatusOfBadJob(t *testing.T) {
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/status?jobid=10", portnum))
-	if err != nil {
-		t.Error("Get localhost unexpectedly threw an error", err)
-		return
-	}
-	if resp.StatusCode != 410 {
-		t.Error("Get localhost expected StatusCode=410 but was", resp.StatusCode)
-	}
+	assertGotStatusCode(410, resp, err, t)
 }
 
 func testRequestingNewJob(t *testing.T) {
-	v := getTestValues()
-	v.Set("debug", "1")
-	resp, err := http.PostForm(fmt.Sprintf("http://localhost:%d/request", portnum), v)
-	if err != nil {
-		t.Error("Get localhost unexpectedly threw an error", err)
-		return
-	}
-	if resp.StatusCode != 200 {
-		t.Error("Get localhost expected StatusCode=200 but was", resp.StatusCode)
-	}
-	body, err := getBody(resp)
-	if err != nil {
-		t.Error("Get response body unexpectedly threw an error", err)
-		return
-	}
+	resp, err := postToRequest(getTestValuesWithDebug())
+	assertGotStatusCode(200, resp, err, t)
+
 	debug_output := `core.JobRequest{Local_filename:"/tmp/upload.gif", Crop_to:image.Rectangle{Min:image.Point{X:0, Y:0}, Max:image.Point{X:200, Y:200}}, Resize_width:0x64, Resize_height:0x0, Uploaded_filename:"uploaded.gif"}`
-	if !strings.Contains(body, debug_output) {
-		t.Error("Expected body to return debug info but was", body)
-	}
+	assertBodyContains(debug_output, resp, err, t)
 }
 
 func testStatusOfExistingJob(t *testing.T) {
-	v := getTestValues()
-	resp, _ := http.PostForm(fmt.Sprintf("http://localhost:%d/request", portnum), v)
+	resp, _ := postToRequest(getTestValues())
 	jobid, err := getIdFromResponse(resp)
 	if err != nil {
 		t.Error("Get id from response unexpectedly threw an error", err)
 		return
 	}
 
-	time.Sleep(5 * time.Second)
-	resp, err = http.Get(fmt.Sprintf("http://localhost:%d/status?jobid=%d", portnum, jobid))
-	if err != nil {
-		t.Error("Get localhost unexpectedly threw an error", err)
-		return
-	}
-	if resp.StatusCode != 200 {
-		t.Error("Get localhost expected StatusCode=200 but was", resp.StatusCode)
-	}
+	resp, err = getStatusOfJobAfterWaiting(jobid)
+	assertGotStatusCode(200, resp, err, t)
+	assertBodyContains("Done", resp, err, t)
 
-	body, err := getBody(resp)
-	if err != nil {
-		t.Error("Get response body unexpectedly threw an error", err)
-	}
-	if !strings.Contains(body, "Done") {
-		t.Error("Expected body to return status but was", body)
-	}
+	assertMockUploadWasCalledWithAllTheCorrectBits(t)
+}
 
+func testStatsReturnsJSON(t *testing.T) {
+	resp, _ := http.Get(fmt.Sprintf("http://localhost:%d/stats", portnum))
+	assertContentTypeWas("application/json", resp, t)
+}
+
+func assertContentTypeWas(mime string, resp *http.Response, t *testing.T) {
+	headers := resp.Header
+	if !strings.Contains(headers.Get("Content-Type"), mime) {
+		t.Errorf(
+			"Content-Type should be '%s' but was '%s'",
+			headers.Get("Content-Type"),
+		)
+	}
+}
+
+func assertMockUploadWasCalledWithAllTheCorrectBits(t *testing.T) {
 	if !mock.WasCalled {
 		t.Error("Did not call the mock uploader")
 	}
@@ -141,15 +119,34 @@ func testStatusOfExistingJob(t *testing.T) {
 	}
 }
 
-func testStatsReturnsJSON(t *testing.T) {
-	resp, _ := http.Get(fmt.Sprintf("http://localhost:%d/stats", portnum))
-	headers := resp.Header
-	if !strings.Contains(headers.Get("Content-Type"), "application/json") {
-		t.Error(
-			"Content-Type should be 'application/jsan' but was:",
-			headers.Get("Content-Type"),
-		)
+func assertGotStatusCode(statuscode int, resp *http.Response, err error, t *testing.T) {
+	if err != nil {
+		t.Error("Get localhost unexpectedly threw an error", err)
+		return
 	}
+	if resp.StatusCode != statuscode {
+		t.Errorf("Get localhost expected StatusCode=%d but was %d", statuscode, resp.StatusCode)
+	}
+}
+
+func assertBodyContains(debug_output string, resp *http.Response, err error, t *testing.T) {
+	body, err := getBody(resp)
+	if err != nil {
+		t.Error("Get response body unexpectedly threw an error", err)
+		return
+	}
+	if !strings.Contains(body, debug_output) {
+		t.Errorf("Expected body to return '%s' but was '%s'", debug_output, body)
+	}
+}
+
+func getStatusOfJobAfterWaiting(jobid int) (*http.Response, error) {
+	time.Sleep(5 * time.Second)
+	return http.Get(fmt.Sprintf("http://localhost:%d/status?jobid=%d", portnum, jobid))
+}
+
+func postToRequest(v url.Values) (*http.Response, error) {
+	return http.PostForm(fmt.Sprintf("http://localhost:%d/request", portnum), v)
 }
 
 func getIdFromResponse(resp *http.Response) (int, error) {
@@ -176,6 +173,11 @@ func getTestValues() url.Values {
 	v.Set("crop_to_h", "200")
 	v.Set("resize_width", "100")
 	v.Set("uploaded_filename", "uploaded.gif")
+	return v
+}
+func getTestValuesWithDebug() url.Values {
+	v := getTestValues()
+	v.Set("debug", "1")
 	return v
 }
 
