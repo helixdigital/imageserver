@@ -17,6 +17,7 @@ limitations under the License.
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"io"
@@ -48,6 +49,18 @@ var jobstore entities.JobStore
 // The setter for the current JobStore
 func InjectJobstore(store entities.JobStore) {
 	jobstore = store
+}
+
+var uploader Uploader
+
+// Uploader is the plugin that will store the image on S3 - or whatever storage provider
+type Uploader interface {
+	Upload([]byte, string, string) error
+}
+
+// The setter for the current uploader
+func InjectUploader(upl Uploader) {
+	uploader = upl
 }
 
 // NewJob takes a JobRequest and starts executing
@@ -97,8 +110,9 @@ func startOneJob(req JobRequest) <-chan entities.StatusMsg {
 	go func() {
 		inputreader := readTheFile(req, statuschannel)
 		defer inputreader.Close()
+		original_image := getImage(req, inputreader, statuschannel)
 
-		cropped_image := cropImage(req, inputreader, statuschannel)
+		cropped_image := cropImage(req, original_image, statuschannel)
 
 		resized_image := resizeImage(req, cropped_image, statuschannel)
 
@@ -120,59 +134,56 @@ func readTheFile(req JobRequest, statuschannel chan entities.StatusMsg) *os.File
 	return inputreader
 }
 
+func getImage(req JobRequest, inputreader io.Reader, statuschannel chan entities.StatusMsg) entities.Image {
+	statuschannel <- entities.StatusMsg{100, "Decoding the file", nil}
+	img, err := entities.NewImage(inputreader, extension(req.Local_filename))
+	if err != nil {
+		statuschannel <- entities.StatusMsg{400, "Error decoding the file", err}
+	}
+	return img
+}
+
 // executes the cropImage part of the job. Sends a msg on the statuschannel
 // when it starts or breaks
-func cropImage(req JobRequest, inputreader io.Reader, statuschannel chan entities.StatusMsg) io.Reader {
+func cropImage(req JobRequest, original_image entities.Image, statuschannel chan entities.StatusMsg) entities.Image {
 	statuschannel <- entities.StatusMsg{100, "Cropping", nil}
-	croprequest := CropRequest{
-		Input:  inputreader,
-		Bounds: req.Crop_to,
-		Format: extension(req.Local_filename),
-	}
-	cropped_image, err := CropImage(croprequest)
-	if err != nil {
-		statuschannel <- entities.StatusMsg{400, "Error in cropping", err}
-	}
-	return cropped_image
+	return original_image.CropTo(req.Crop_to)
 }
 
 // executes the resizeImage part of the job. Sends a msg on the statuschannel
 // when it starts or breaks
-func resizeImage(req JobRequest, inputreader io.Reader, statuschannel chan entities.StatusMsg) io.Reader {
+func resizeImage(req JobRequest, original_image entities.Image, statuschannel chan entities.StatusMsg) entities.Image {
 	statuschannel <- entities.StatusMsg{100, "Resizing", nil}
-	resizerequest := ResizeRequest{
-		Reader: inputreader,
-		Width:  req.Resize_width,
-		Height: req.Resize_height,
-		Format: extension(req.Local_filename),
-	}
-	resized, err := ResizeImage(resizerequest)
-	if err != nil {
-		statuschannel <- entities.StatusMsg{400, "Error in resizing", err}
-	}
-	return resized
+	return original_image.ResizeTo(req.Resize_width, req.Resize_height)
 }
 
 // executes the uploadFile part of the job. Sends a msg on the statuschannel
 // when it starts or breaks
-func uploadFile(req JobRequest, inputreader io.Reader, statuschannel chan entities.StatusMsg) {
+func uploadFile(req JobRequest, image_to_upload entities.Image, statuschannel chan entities.StatusMsg) {
 	statuschannel <- entities.StatusMsg{100, "Uploading", nil}
-	uploadreq := UploadRequest{
-		Reader:       inputreader,
-		MimeType:     mimetype(req.Uploaded_filename),
-		UploadedName: req.Uploaded_filename,
-	}
-	err := Upload(uploadreq)
-	if err != nil {
+	if err := sendToUploader(
+		image_to_upload.Reader(),
+		mimetype(req.Uploaded_filename),
+		req.Uploaded_filename,
+	); err != nil {
 		statuschannel <- entities.StatusMsg{400, "Error in uploading", err}
 	}
 }
 
+// Upload will store the given file on S3
+func sendToUploader(rdr io.Reader, mime string, uploadedName string) error {
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(rdr); err != nil {
+		return err
+	}
+	return uploader.Upload(buf.Bytes(), mime, uploadedName)
+}
+
 func mimetype(filename string) string {
-	ds := map[int]string{
-		Jpg: "image/jpeg",
-		Png: "image/png",
-		Gif: "image/gif",
+	ds := map[entities.Format]string{
+		entities.Jpg: "image/jpeg",
+		entities.Png: "image/png",
+		entities.Gif: "image/gif",
 	}
 	return ds[extension(filename)]
 }
@@ -186,37 +197,16 @@ func JobStatus(jobid int) (string, error) {
 	return job.Status, job.Err
 }
 
-func extension(input string) int {
+func extension(input string) entities.Format {
 	lastdot := strings.LastIndex(input, ".")
 	ext := strings.ToLower(input[lastdot:])
 	switch ext {
 	case ".jpeg", ".jpg":
-		return Jpg
+		return entities.Jpg
 	case ".gif":
-		return Gif
+		return entities.Gif
 	case ".png":
-		return Png
+		return entities.Png
 	}
-	return Png
-}
-
-// for testing only.
-func MakeGrayFile(w int, h int, filename string) error { /* Could probably go somewhere else */
-	rdr := encodeToBuffer(getGrayImage(w, h), extension(filename))
-	outputfile, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer outputfile.Close()
-	_, err = io.Copy(outputfile, rdr)
-	return err
-}
-
-func getGrayImage(width int, height int) *image.Gray {
-	rect := image.Rect(0, 0, width, height)
-	return image.NewGray(rect)
-}
-
-func getGrayReader(w int, h int, format int) io.Reader {
-	return encodeToBuffer(getGrayImage(w, h), format)
+	return entities.Png
 }

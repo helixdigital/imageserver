@@ -18,9 +18,11 @@ package core
 
 import (
 	"image"
+	"io"
 	"os"
 	"testing"
 
+	"github.com/helixdigital/imageserver/entities"
 	"github.com/helixdigital/imageserver/plugin/storage"
 	"github.com/helixdigital/imageserver/plugin/upload"
 )
@@ -49,4 +51,20 @@ func TestNewJob(t *testing.T) {
 		t.Errorf("Expected jobid to be %d but was %d\n", 0, jobid)
 	}
 
+}
+
+func MakeGrayFile(w int, h int, filename string) error {
+	image := entities.Image{getGrayImage(w, h), extension(filename)}
+	outputfile, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer outputfile.Close()
+	_, err = io.Copy(outputfile, image.Reader())
+	return err
+}
+
+func getGrayImage(w int, h int) *image.Gray {
+	rect := image.Rect(0, 0, w, h)
+	return image.NewGray(rect)
 }

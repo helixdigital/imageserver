@@ -14,9 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// This package implements the user stories for this application.
-//
-// The primary entry point to these user stories is the NewJob()
-// function: it accepts a file and a bunch of parameters and will
-// perform the various transformations to the file
-package core
+package entities
+
+import "testing"
+
+func TestImageReader(t *testing.T) {
+}

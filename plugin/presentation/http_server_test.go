@@ -18,6 +18,8 @@ package presentation
 
 import (
 	"fmt"
+	"image"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -28,6 +30,7 @@ import (
 	"time"
 
 	"github.com/helixdigital/imageserver/core"
+	"github.com/helixdigital/imageserver/entities"
 	"github.com/helixdigital/imageserver/plugin/storage"
 	"github.com/helixdigital/imageserver/plugin/upload"
 )
@@ -43,7 +46,7 @@ func TestAllWithSetup(t *testing.T) {
 	store := storage.NewJobStore()
 	core.InjectJobstore(&store)
 	core.InjectStorageReporter(&store)
-	err := core.MakeGrayFile(1000, 1000, "/tmp/upload.gif")
+	err := MakeGrayFile(1000, 1000, "/tmp/upload.gif")
 	if err != nil {
 		t.Error("Error in creating test file")
 	}
@@ -174,4 +177,34 @@ func getTestValues() url.Values {
 	v.Set("resize_width", "100")
 	v.Set("uploaded_filename", "uploaded.gif")
 	return v
+}
+
+func MakeGrayFile(w int, h int, filename string) error {
+	image := entities.Image{getGrayImage(w, h), extension(filename)}
+	outputfile, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer outputfile.Close()
+	_, err = io.Copy(outputfile, image.Reader())
+	return err
+}
+
+func getGrayImage(w int, h int) *image.Gray {
+	rect := image.Rect(0, 0, w, h)
+	return image.NewGray(rect)
+}
+
+func extension(input string) entities.Format {
+	lastdot := strings.LastIndex(input, ".")
+	ext := strings.ToLower(input[lastdot:])
+	switch ext {
+	case ".jpeg", ".jpg":
+		return entities.Jpg
+	case ".gif":
+		return entities.Gif
+	case ".png":
+		return entities.Png
+	}
+	return entities.Png
 }

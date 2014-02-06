@@ -1,6 +1,11 @@
 GOPATH = $(shell cd $(CURDIR)/../../../..; pwd)
-current:
+current: tag test
+
+build:
 	go build .
+
+tag:
+	ctags --recurse=yes .
 
 fullbuild:
 	go get github.com/nfnt/resize
