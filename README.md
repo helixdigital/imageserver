@@ -1,6 +1,9 @@
 Imageserver
 ===========
 
+[v.1.0.1](http://semver.org/)
+
+
 
 What is it?
 -----------
@@ -14,7 +17,7 @@ How to use it?
 
 `imageserver --port=9877 [--s3accesskey="c0ffee"] [--s3secretkey="cafe"] [--s3bucketname="mybucket"]`
 
-`-port` The port the imageserver will serve
+`--port` The port the imageserver will serve
 
 if any of the --s3... parameters are missing, they must be specified in the environment variables:
 `IMAGESERVER_S3_ACCESS_KEY`
@@ -61,13 +64,6 @@ How do I compile it?
 
 * `go get github.com/helixdigital.com/imageserver`
 * `make fullcompile`
-
-Does it have code dependencies?
--------------------------------
-
-* github.com/nfnt/resize
-* launchpad.net/goamz/aws
-* launchpad.net/goamz/s3
 
 How is it licensed?
 -------------------
